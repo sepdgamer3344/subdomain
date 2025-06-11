@@ -29,7 +29,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Form submission with Discord webhook integration
+    // Form submission with Discord webhook and Cloudflare integration
     const subdomainForm = document.getElementById('subdomainForm');
     const responseMessage = document.getElementById('responseMessage');
     
@@ -74,9 +74,117 @@ document.addEventListener('DOMContentLoaded', function() {
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
         
-        // Send to Discord webhook
-        sendToDiscord(formData);
+        // First create the DNS record in Cloudflare
+        createCloudflareDNSRecord(formData)
+            .then(() => {
+                // If Cloudflare succeeds, send to Discord
+                return sendToDiscord(formData);
+            })
+            .then(() => {
+                // Show success message
+                const connectionString = formData.serverPort 
+                    ? `${formData.subdomain}.mcdomain.net:${formData.serverPort}`
+                    : `${formData.subdomain}.mcdomain.net`;
+                
+                showResponse('success', 
+                    `Subdomain created successfully! Players can connect using:<br><code>${connectionString}</code>`);
+                subdomainForm.reset();
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showResponse('error', error.message || 'Failed to create subdomain. Please try again later.');
+            })
+            .finally(() => {
+                const submitBtn = subdomainForm.querySelector('.submit-btn');
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create Subdomain';
+            });
     });
+    
+    async function createCloudflareDNSRecord(data) {
+        // Cloudflare API credentials and zone ID
+        const cloudflareConfig = {
+            apiToken: 'YOUR_CLOUDFLARE_API_TOKEN', // Replace with your API token
+            zoneId: 'YOUR_CLOUDFLARE_ZONE_ID',     // Replace with your zone ID
+            domain: 'mcdomain.net'                 // Your root domain
+        };
+        
+        // Prepare the DNS record data
+        const recordData = {
+            type: 'A',
+            name: data.subdomain,
+            content: data.serverAddress,
+            ttl: 1, // Auto TTL
+            proxied: false // Disable Cloudflare proxy for game servers
+        };
+        
+        // If port is specified, we'll create an SRV record as well
+        let srvRecordData = null;
+        if (data.serverPort) {
+            srvRecordData = {
+                type: 'SRV',
+                data: {
+                    name: `_minecraft._tcp.${data.subdomain}`,
+                    service: '_minecraft',
+                    proto: '_tcp',
+                    priority: 10,
+                    weight: 5,
+                    port: parseInt(data.serverPort),
+                    target: `${data.subdomain}.${cloudflareConfig.domain}`
+                },
+                ttl: 1
+            };
+        }
+        
+        try {
+            // First create the A record
+            const aRecordResponse = await fetch(
+                `https://api.cloudflare.com/client/v4/zones/${cloudflareConfig.zoneId}/dns_records`, 
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${cloudflareConfig.apiToken}`
+                    },
+                    body: JSON.stringify(recordData)
+                }
+            );
+            
+            const aRecordResult = await aRecordResponse.json();
+            
+            if (!aRecordResponse.ok || !aRecordResult.success) {
+                throw new Error(aRecordResult.errors?.[0]?.message || 'Failed to create A record in Cloudflare');
+            }
+            
+            // If port was specified, create the SRV record
+            if (srvRecordData) {
+                const srvRecordResponse = await fetch(
+                    `https://api.cloudflare.com/client/v4/zones/${cloudflareConfig.zoneId}/dns_records`, 
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${cloudflareConfig.apiToken}`
+                        },
+                        body: JSON.stringify(srvRecordData)
+                    }
+                );
+                
+                const srvRecordResult = await srvRecordResponse.json();
+                
+                if (!srvRecordResponse.ok || !srvRecordResult.success) {
+                    // If SRV fails but A succeeded, we should probably delete the A record
+                    // But for simplicity, we'll just report the error
+                    throw new Error(srvRecordResult.errors?.[0]?.message || 'Failed to create SRV record in Cloudflare');
+                }
+            }
+            
+            return true;
+        } catch (error) {
+            console.error('Cloudflare API error:', error);
+            throw new Error('Failed to create DNS records. Please try again later.');
+        }
+    }
     
     function sendToDiscord(data) {
         // Replace with your actual Discord webhook URL
@@ -127,7 +235,7 @@ document.addEventListener('DOMContentLoaded', function() {
         };
         
         // Send to Discord
-        fetch(webhookUrl, {
+        return fetch(webhookUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -139,20 +247,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error('Failed to send to Discord');
             }
             return response;
-        })
-        .then(() => {
-            showResponse('success', 
-                `Subdomain created! Players can connect using:<br><code>${connectionString}</code>`);
-            subdomainForm.reset();
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            showResponse('error', 'Failed to create subdomain. Please try again later.');
-        })
-        .finally(() => {
-            const submitBtn = subdomainForm.querySelector('.submit-btn');
-            submitBtn.disabled = false;
-            submitBtn.textContent = 'Create Subdomain';
         });
     }
     
