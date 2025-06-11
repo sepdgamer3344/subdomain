@@ -1,4 +1,3 @@
-<script>
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.getElementById('subdomainForm');
     const responseMessage = document.getElementById('responseMessage');
@@ -167,4 +166,3 @@ document.addEventListener('DOMContentLoaded', function () {
         setTimeout(() => el.style.display = 'none', 8000);
     }
 });
-</script>
