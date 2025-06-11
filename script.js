@@ -11,6 +11,20 @@ document.addEventListener('DOMContentLoaded', function() {
         const email = document.getElementById('email').value.trim();
         const connectionString = `${subdomain}.finitymc.fun${serverPort !== '25565' ? ':' + serverPort : ''}`;
 
+        // Input validation
+        if (!isValidSubdomain(subdomain)) {
+            showResponse('error', 'Invalid subdomain. Use alphanumeric characters and hyphens only.');
+            return;
+        }
+        if (!isValidIp(serverAddress)) {
+            showResponse('error', 'Invalid server IP address.');
+            return;
+        }
+        if (!isValidPort(serverPort)) {
+            showResponse('error', 'Invalid port. Use a number between 1 and 65535.');
+            return;
+        }
+
         const submitBtn = form.querySelector('.submit-btn');
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
@@ -40,8 +54,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             showResponse('error', `
                 <strong>Error processing DNS records!</strong><br>
-                Please try again or contact support.
-                Error: ${error.message}
+                ${error.message || 'Please try again or contact support.'}
             `);
             console.error('DNS processing error:', error);
         } finally {
@@ -75,33 +88,46 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         try {
-            let response = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(aRecord)
-            });
-            
-            let result = await response.json();
-            
-            if (!result.success && result.errors?.[0]?.code === 81053) {
-                const listResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=A&name=${fqdn}`, {
-                    method: 'GET',
-                    headers
+            await retryApiCall(async () => {
+                let response = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(aRecord)
                 });
                 
-                const listResult = await listResponse.json();
+                let result = await response.json();
                 
-                if (listResult.success && listResult.result.length > 0) {
-                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${listResult.result[0].id}`, {
-                        method: 'PUT',
-                        headers,
-                        body: JSON.stringify(aRecord)
-                    });
+                if (!result.success) {
+                    if (result.errors?.[0]?.code === 81053) {
+                        // Record exists, update it
+                        const listResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=A&name=${fqdn}`, {
+                            method: 'GET',
+                            headers
+                        });
+                        
+                        const listResult = await listResponse.json();
+                        
+                        if (listResult.success && listResult.result.length > 0) {
+                            response = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${listResult.result[0].id}`, {
+                                method: 'PUT',
+                                headers,
+                                body: JSON.stringify(aRecord)
+                            });
+                            result = await response.json();
+                            if (!result.success) {
+                                throw new Error(`Failed to update A record: ${JSON.stringify(result.errors)}`);
+                            }
+                        } else {
+                            throw new Error(`Failed to find existing A record: ${JSON.stringify(listResult.errors)}`);
+                        }
+                    } else {
+                        throw new Error(`Failed to create A record: ${JSON.stringify(result.errors)}`);
+                    }
                 }
-            }
+            });
         } catch (e) {
             console.error('A record creation failed:', e);
-            throw new Error('Failed to create/update A record');
+            throw new Error(`A record processing failed: ${e.message}`);
         }
 
         // Create/Update SRV Record
@@ -121,33 +147,45 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         try {
-            let response = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(srvRecord)
-            });
-            
-            let result = await response.json();
-            
-            if (!result.success && result.errors?.[0]?.code === 81053) {
-                const listResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=_minecraft._tcp.${fqdn}`, {
-                    method: 'GET',
-                    headers
+            await retryApiCall(async () => {
+                let response = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify(srvRecord)
                 });
                 
-                const listResult = await listResponse.json();
+                let result = await response.json();
                 
-                if (listResult.success && listResult.result.length > 0) {
-                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${listResult.result[0].id}`, {
-                        method: 'PUT',
-                        headers,
-                        body: JSON.stringify(srvRecord)
-                    });
+                if (!result.success) {
+                    if (result.errors?.[0]?.code === 81053) {
+                        const listResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=_minecraft._tcp.${fqdn}`, {
+                            method: 'GET',
+                            headers
+                        });
+                        
+                        const listResult = await listResponse.json();
+                        
+                        if (listResult.success && listResult.result.length > 0) {
+                            response = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${listResult.result[0].id}`, {
+                                method: 'PUT',
+                                headers,
+                                body: JSON.stringify(srvRecord)
+                            });
+                            result = await response.json();
+                            if (!result.success) {
+                                throw new Error(`Failed to update SRV record: ${JSON.stringify(result.errors)}`);
+                            }
+                        } else {
+                            throw new Error(`Failed to find existing SRV record: ${JSON.stringify(listResult.errors)}`);
+                        }
+                    } else {
+                        throw new Error(`Failed to create SRV record: ${JSON.stringify(result.errors)}`);
+                    }
                 }
-            }
+            });
         } catch (e) {
             console.error('SRV record creation failed:', e);
-            throw new Error('Failed to create/update SRV record');
+            throw new Error(`SRV record processing failed: ${e.message}`);
         }
     }
 
@@ -192,5 +230,31 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
             el.style.display = 'none';
         }, 10000);
+    }
+
+    // Input validation functions
+    function isValidSubdomain(subdomain) {
+        return /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain);
+    }
+
+    function isValidIp(ip) {
+        return /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(ip);
+    }
+
+    function isValidPort(port) {
+        const portNum = parseInt(port);
+        return !isNaN(portNum) && portNum >= 1 && portNum <= 65535;
+    }
+
+    // Retry API call with exponential backoff
+    async function retryApiCall(fn, maxRetries = 3, delay = 1000) {
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                return await fn();
+            } catch (e) {
+                if (i === maxRetries - 1) throw e;
+                await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+            }
+        }
     }
 });
