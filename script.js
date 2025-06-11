@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', function () {
             timestamp: new Date().toLocaleString()
         };
 
-        // Basic format validation (not connection validation)
+        // Only basic validation
         if (!/^[a-z0-9-]+$/.test(formData.subdomain)) {
             showResponse('error', 'Subdomain can only contain lowercase letters, numbers, and hyphens');
             return;
@@ -72,11 +72,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 ? `${formData.subdomain}.finitymc.fun:${formData.serverPort}`
                 : `${formData.subdomain}.finitymc.fun`;
 
-            showResponse('success', `Subdomain created successfully! Players can connect using:<br><code>${connectionString}</code>`);
+            showResponse('success', `Subdomain created! Connect via:<br><code>${connectionString}</code>`);
             subdomainForm.reset();
         } catch (error) {
-            console.error(error);
-            showResponse('error', 'Failed to create subdomain: ' + error.message);
+            console.error('Error:', error);
+            showResponse('error', 'Error creating subdomain: ' + error.message);
         } finally {
             submitBtn.disabled = false;
             submitBtn.textContent = 'Create Subdomain';
@@ -90,7 +90,7 @@ document.addEventListener('DOMContentLoaded', function () {
             domain: 'finitymc.fun'
         };
 
-        // A Record
+        // 1. Create A Record
         const aRes = await fetchWithTimeout(
             `https://api.cloudflare.com/client/v4/zones/${cloudflareConfig.zoneId}/dns_records`,
             {
@@ -112,10 +112,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const aJson = await aRes.json();
         if (!aJson.success) {
-            throw new Error(`Cloudflare A record failed: ${JSON.stringify(aJson.errors)}`);
+            throw new Error(`A record failed: ${JSON.stringify(aJson.errors)}`);
         }
 
-        // SRV Record if port is present
+        // 2. Create SRV record (if port given)
         if (data.serverPort) {
             const srvRes = await fetchWithTimeout(
                 `https://api.cloudflare.com/client/v4/zones/${cloudflareConfig.zoneId}/dns_records`,
@@ -133,7 +133,7 @@ document.addEventListener('DOMContentLoaded', function () {
                             proto: '_tcp',
                             name: data.subdomain,
                             priority: 0,
-                            weight: 0,
+                            weight: 5,
                             port: parseInt(data.serverPort),
                             target: `${data.subdomain}.${cloudflareConfig.domain}`
                         },
@@ -145,7 +145,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const srvJson = await srvRes.json();
             if (!srvJson.success) {
-                throw new Error(`Cloudflare SRV record failed: ${JSON.stringify(srvJson.errors)}`);
+                throw new Error(`SRV record failed: ${JSON.stringify(srvJson.errors)}`);
             }
         }
 
@@ -181,9 +181,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function fetchWithTimeout(url, options, timeout) {
         return Promise.race([
             fetch(url, options),
-            new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Request timeout')), timeout)
-            )
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), timeout))
         ]);
     }
 
