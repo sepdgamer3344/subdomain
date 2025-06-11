@@ -1,37 +1,11 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const themeToggle = document.getElementById('themeToggle');
-    const body = document.body;
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    body.classList.toggle('light-mode', savedTheme === 'light');
-    updateThemeButton();
-
-    themeToggle.addEventListener('click', function () {
-        body.classList.toggle('light-mode');
-        const currentTheme = body.classList.contains('light-mode') ? 'light' : 'dark';
-        localStorage.setItem('theme', currentTheme);
-        updateThemeButton();
-    });
-
-    function updateThemeButton() {
-        const isLightMode = body.classList.contains('light-mode');
-        themeToggle.innerHTML = isLightMode
-            ? '<i class="fas fa-sun"></i> Light Mode'
-            : '<i class="fas fa-moon"></i> Dark Mode';
-    }
-
-    document.querySelectorAll('.port-preset').forEach(button => {
-        button.addEventListener('click', function () {
-            document.getElementById('server-port').value = this.dataset.port;
-        });
-    });
-
-    const subdomainForm = document.getElementById('subdomainForm');
+    const form = document.getElementById('subdomainForm');
     const responseMessage = document.getElementById('responseMessage');
 
-    subdomainForm.addEventListener('submit', async function (e) {
+    form.addEventListener('submit', async function (e) {
         e.preventDefault();
 
-        const formData = {
+        const data = {
             subdomain: document.getElementById('subdomain-name').value.trim().toLowerCase(),
             serverAddress: document.getElementById('server-address').value.trim(),
             serverPort: document.getElementById('server-port').value.trim(),
@@ -39,60 +13,51 @@ document.addEventListener('DOMContentLoaded', function () {
             timestamp: new Date().toLocaleString()
         };
 
-        if (!/^[a-z0-9-]+$/.test(formData.subdomain)) {
-            showResponse('error', 'Subdomain can only contain lowercase letters, numbers, and hyphens');
-            return;
-        }
+        const connectionString = data.serverPort
+            ? `${data.subdomain}.finitymc.fun:${data.serverPort}`
+            : `${data.subdomain}.finitymc.fun`;
 
-        if (formData.subdomain.length < 3 || formData.subdomain.length > 32) {
-            showResponse('error', 'Subdomain must be between 3 and 32 characters');
-            return;
-        }
-
-        if (formData.serverPort && !/^\d{1,5}$/.test(formData.serverPort)) {
-            showResponse('error', 'Port must be a number between 1 and 65535');
-            return;
-        }
-
-        if (!formData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-            showResponse('error', 'Please enter a valid email address');
-            return;
-        }
-
-        const submitBtn = subdomainForm.querySelector('.submit-btn');
+        const submitBtn = form.querySelector('.submit-btn');
         submitBtn.disabled = true;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
 
-        // Always proceed without error
-        await createCloudflareDNSRecord(formData);
-        sendToDiscord(formData).catch(console.warn);
+        await createOrUpdateDNS(data);
+        sendToDiscord(data).catch(console.warn);
 
-        const connectionString = formData.serverPort
-            ? `${formData.subdomain}.finitymc.fun:${formData.serverPort}`
-            : `${formData.subdomain}.finitymc.fun`;
-
-        showResponse('success', `Subdomain created! Connect via:<br><code>${connectionString}</code>`);
-        subdomainForm.reset();
+        showResponse('success', `Subdomain created or updated! Connect via:<br><code>${connectionString}</code>`);
+        form.reset();
         submitBtn.disabled = false;
         submitBtn.textContent = 'Create Subdomain';
     });
 
-    async function createCloudflareDNSRecord(data) {
+    async function createOrUpdateDNS(data) {
         const config = {
             apiToken: 'pO12MTiDazKkktAmSGzIAjJ8paftMoxpFoI4W1hU',
             zoneId: 'b38dd3165dd80f7bbeffabd7f691581f',
             domain: 'finitymc.fun'
         };
 
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiToken}`
+        };
+
+        const fqdn = `${data.subdomain}.${config.domain}`;
+
+        // --- A RECORD ---
         try {
-            await fetchWithTimeout(
-                `https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${config.apiToken}`
-                    },
+            const checkA = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=A&name=${fqdn}`, {
+                method: 'GET',
+                headers
+            });
+            const resultA = await checkA.json();
+
+            if (resultA.result.length > 0) {
+                // Update existing A record
+                const recordId = resultA.result[0].id;
+                await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${recordId}`, {
+                    method: 'PUT',
+                    headers,
                     body: JSON.stringify({
                         type: 'A',
                         name: data.subdomain,
@@ -100,91 +65,109 @@ document.addEventListener('DOMContentLoaded', function () {
                         ttl: 1,
                         proxied: false
                     })
-                },
-                5000
-            );
+                });
+            } else {
+                // Create new A record
+                await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        type: 'A',
+                        name: data.subdomain,
+                        content: data.serverAddress,
+                        ttl: 1,
+                        proxied: false
+                    })
+                });
+            }
         } catch (e) {
-            console.warn('A record creation failed, ignoring...', e);
+            console.warn('A record failed:', e);
         }
 
+        // --- SRV RECORD ---
         if (data.serverPort) {
+            const srvName = `_minecraft._tcp.${data.subdomain}`;
             try {
-                await fetchWithTimeout(
-                    `https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`,
-                    {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${config.apiToken}`
-                        },
+                const checkSRV = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=${srvName}.${config.domain}`, {
+                    method: 'GET',
+                    headers
+                });
+                const resultSRV = await checkSRV.json();
+
+                const srvData = {
+                    service: '_minecraft',
+                    proto: '_tcp',
+                    name: data.subdomain,
+                    priority: 0,
+                    weight: 5,
+                    port: parseInt(data.serverPort),
+                    target: fqdn
+                };
+
+                if (resultSRV.result.length > 0) {
+                    // Update existing SRV
+                    const srvId = resultSRV.result[0].id;
+                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${srvId}`, {
+                        method: 'PUT',
+                        headers,
                         body: JSON.stringify({
                             type: 'SRV',
-                            name: `_minecraft._tcp.${data.subdomain}`,
-                            data: {
-                                service: '_minecraft',
-                                proto: '_tcp',
-                                name: data.subdomain,
-                                priority: 0,
-                                weight: 5,
-                                port: parseInt(data.serverPort),
-                                target: `${data.subdomain}.${config.domain}`
-                            },
+                            name: srvName,
+                            data: srvData,
                             ttl: 1
                         })
-                    },
-                    5000
-                );
+                    });
+                } else {
+                    // Create new SRV
+                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            type: 'SRV',
+                            name: srvName,
+                            data: srvData,
+                            ttl: 1
+                        })
+                    });
+                }
             } catch (e) {
-                console.warn('SRV record creation failed, ignoring...', e);
+                console.warn('SRV record failed:', e);
             }
         }
-
-        return true;
     }
 
     async function sendToDiscord(data) {
-        const webhookUrl = 'https://discord.com/api/webhooks/1362020228606726265/xQbU0IJEuCy3T_VZrn83ar7aIob3ypswd_wm_jg1_4IdWDNri8iqde8Qdc3DEj_g0_OJ';
-        const connectionString = data.serverPort
+        const webhook = 'https://discord.com/api/webhooks/1362020228606726265/xQbU0IJEuCy3T_VZrn83ar7aIob3ypswd_wm_jg1_4IdWDNri8iqde8Qdc3DEj_g0_OJ';
+        const connection = data.serverPort
             ? `${data.subdomain}.finitymc.fun:${data.serverPort}`
             : `${data.subdomain}.finitymc.fun`;
 
         const embed = {
-            title: 'New Subdomain Request',
-            color: 0x7289DA,
+            title: 'DNS Record Updated or Created',
+            color: 0x00ff88,
             fields: [
                 { name: 'Subdomain', value: `${data.subdomain}.finitymc.fun`, inline: true },
-                { name: 'Points to', value: `${data.serverAddress}:${data.serverPort || '25565'}`, inline: true },
-                { name: 'Full Connection', value: `\`${connectionString}\``, inline: false },
-                { name: 'Email', value: data.email, inline: true }
+                { name: 'IP', value: data.serverAddress, inline: true },
+                { name: 'Port', value: data.serverPort || 'default', inline: true },
+                { name: 'Email', value: data.email, inline: true },
+                { name: 'Connect With', value: `\`${connection}\``, inline: false }
             ],
             timestamp: new Date().toISOString(),
-            footer: { text: 'Subdomain Request • ' + data.timestamp }
+            footer: { text: `Submitted at ${data.timestamp}` }
         };
 
-        try {
-            await fetchWithTimeout(webhookUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ embeds: [embed], username: 'Subdomain Creator' })
-            }, 5000);
-        } catch (e) {
-            console.warn('Discord webhook failed, ignoring...', e);
-        }
+        await fetch(webhook, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ embeds: [embed] })
+        });
     }
 
-    function fetchWithTimeout(url, options, timeout) {
-        return Promise.race([
-            fetch(url, options),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), timeout))
-        ]);
-    }
-
-    function showResponse(type, message) {
-        responseMessage.innerHTML = message;
-        responseMessage.className = 'response-message ' + type;
-        responseMessage.style.display = 'block';
-        setTimeout(() => {
-            responseMessage.style.display = 'none';
-        }, 8000);
+    function showResponse(type, msg) {
+        const el = document.getElementById('responseMessage');
+        el.className = `response-message ${type}`;
+        el.innerHTML = msg;
+        el.style.display = 'block';
+        setTimeout(() => el.style.display = 'none', 8000);
     }
 });
