@@ -1,12 +1,11 @@
-document.addEventListener('DOMContentLoaded', function() {
-    // Theme toggle
+document.addEventListener('DOMContentLoaded', function () {
     const themeToggle = document.getElementById('themeToggle');
     const body = document.body;
     const savedTheme = localStorage.getItem('theme') || 'dark';
     body.classList.toggle('light-mode', savedTheme === 'light');
     updateThemeButton();
 
-    themeToggle.addEventListener('click', function() {
+    themeToggle.addEventListener('click', function () {
         body.classList.toggle('light-mode');
         const currentTheme = body.classList.contains('light-mode') ? 'light' : 'dark';
         localStorage.setItem('theme', currentTheme);
@@ -20,18 +19,16 @@ document.addEventListener('DOMContentLoaded', function() {
             : '<i class="fas fa-moon"></i> Dark Mode';
     }
 
-    // Port preset buttons
     document.querySelectorAll('.port-preset').forEach(button => {
-        button.addEventListener('click', function() {
+        button.addEventListener('click', function () {
             document.getElementById('server-port').value = this.dataset.port;
         });
     });
 
-    // Form submission
     const subdomainForm = document.getElementById('subdomainForm');
     const responseMessage = document.getElementById('responseMessage');
 
-    subdomainForm.addEventListener('submit', async function(e) {
+    subdomainForm.addEventListener('submit', async function (e) {
         e.preventDefault();
 
         const formData = {
@@ -42,6 +39,7 @@ document.addEventListener('DOMContentLoaded', function() {
             timestamp: new Date().toLocaleString()
         };
 
+        // Basic format validation (not connection validation)
         if (!/^[a-z0-9-]+$/.test(formData.subdomain)) {
             showResponse('error', 'Subdomain can only contain lowercase letters, numbers, and hyphens');
             return;
@@ -49,11 +47,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (formData.subdomain.length < 3 || formData.subdomain.length > 32) {
             showResponse('error', 'Subdomain must be between 3 and 32 characters');
-            return;
-        }
-
-        if (formData.serverAddress.length < 2) {
-            showResponse('error', 'Please enter a valid server address');
             return;
         }
 
@@ -73,7 +66,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         try {
             await createCloudflareDNSRecord(formData);
-            sendToDiscord(formData).catch(e => console.error('Discord notification failed:', e));
+            sendToDiscord(formData).catch(console.warn);
 
             const connectionString = formData.serverPort
                 ? `${formData.subdomain}.finitymc.fun:${formData.serverPort}`
@@ -82,8 +75,8 @@ document.addEventListener('DOMContentLoaded', function() {
             showResponse('success', `Subdomain created successfully! Players can connect using:<br><code>${connectionString}</code>`);
             subdomainForm.reset();
         } catch (error) {
-            console.error('Error:', error);
-            showResponse('error', `Failed to create subdomain: ${error.message}`);
+            console.error(error);
+            showResponse('error', 'Failed to create subdomain: ' + error.message);
         } finally {
             submitBtn.disabled = false;
             submitBtn.textContent = 'Create Subdomain';
@@ -97,8 +90,8 @@ document.addEventListener('DOMContentLoaded', function() {
             domain: 'finitymc.fun'
         };
 
-        // Create A record
-        const aRecordRes = await fetchWithTimeout(
+        // A Record
+        const aRes = await fetchWithTimeout(
             `https://api.cloudflare.com/client/v4/zones/${cloudflareConfig.zoneId}/dns_records`,
             {
                 method: 'POST',
@@ -117,14 +110,14 @@ document.addEventListener('DOMContentLoaded', function() {
             5000
         );
 
-        const aResult = await aRecordRes.json();
-        if (!aResult.success) {
-            throw new Error(`A record error: ${JSON.stringify(aResult.errors)}`);
+        const aJson = await aRes.json();
+        if (!aJson.success) {
+            throw new Error(`Cloudflare A record failed: ${JSON.stringify(aJson.errors)}`);
         }
 
-        // Create SRV record if port provided
+        // SRV Record if port is present
         if (data.serverPort) {
-            const srvRecordRes = await fetchWithTimeout(
+            const srvRes = await fetchWithTimeout(
                 `https://api.cloudflare.com/client/v4/zones/${cloudflareConfig.zoneId}/dns_records`,
                 {
                     method: 'POST',
@@ -150,9 +143,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 5000
             );
 
-            const srvResult = await srvRecordRes.json();
-            if (!srvResult.success) {
-                throw new Error(`SRV record error: ${JSON.stringify(srvResult.errors)}`);
+            const srvJson = await srvRes.json();
+            if (!srvJson.success) {
+                throw new Error(`Cloudflare SRV record failed: ${JSON.stringify(srvJson.errors)}`);
             }
         }
 
@@ -169,50 +162,28 @@ document.addEventListener('DOMContentLoaded', function() {
             title: 'New Subdomain Request',
             color: 0x7289DA,
             fields: [
-                {
-                    name: 'Subdomain',
-                    value: `${data.subdomain}.finitymc.fun`,
-                    inline: true
-                },
-                {
-                    name: 'Points to',
-                    value: data.serverAddress + (data.serverPort ? `:${data.serverPort}` : ''),
-                    inline: true
-                },
-                {
-                    name: 'Full Connection',
-                    value: `\`${connectionString}\``,
-                    inline: false
-                },
-                {
-                    name: 'Email',
-                    value: data.email,
-                    inline: true
-                }
+                { name: 'Subdomain', value: `${data.subdomain}.finitymc.fun`, inline: true },
+                { name: 'Points to', value: `${data.serverAddress}:${data.serverPort || '25565'}`, inline: true },
+                { name: 'Full Connection', value: `\`${connectionString}\``, inline: false },
+                { name: 'Email', value: data.email, inline: true }
             ],
             timestamp: new Date().toISOString(),
-            footer: {
-                text: 'Subdomain Request • ' + data.timestamp
-            }
-        };
-
-        const payload = {
-            embeds: [embed],
-            username: 'Subdomain Creator',
-            avatar_url: 'https://i.imgur.com/J1wY1Qy.png'
+            footer: { text: 'Subdomain Request • ' + data.timestamp }
         };
 
         await fetchWithTimeout(webhookUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({ embeds: [embed], username: 'Subdomain Creator' })
         }, 5000);
     }
 
     function fetchWithTimeout(url, options, timeout) {
         return Promise.race([
             fetch(url, options),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Request timeout')), timeout))
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Request timeout')), timeout)
+            )
         ]);
     }
 
