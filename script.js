@@ -64,31 +64,41 @@ document.addEventListener('DOMContentLoaded', function () {
                 proxied: false
             };
 
-            if (resultA.result.length > 0) {
+            if (resultA.result && resultA.result.length > 0) {
                 // Update existing A record
                 const recordId = resultA.result[0].id;
-                await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${recordId}`, {
+                const updateResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${recordId}`, {
                     method: 'PUT',
                     headers,
                     body: JSON.stringify(aRecordData)
                 });
+                const updateResult = await updateResponse.json();
+                if (!updateResult.success) {
+                    throw new Error(updateResult.errors[0].message || 'Failed to update A record');
+                }
             } else {
                 // Create new A record
-                await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                const createResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify(aRecordData)
                 });
+                const createResult = await createResponse.json();
+                if (!createResult.success) {
+                    throw new Error(createResult.errors[0].message || 'Failed to create A record');
+                }
             }
         } catch (e) {
-            console.warn('A record failed:', e);
+            console.error('A record failed:', e);
+            throw e;
         }
 
         // --- SRV RECORD ---
         if (data.serverPort) {
             const srvName = `_minecraft._tcp.${data.subdomain}`;
+            const srvFqdn = `${srvName}.${config.domain}`;
             try {
-                const checkSRV = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=${srvName}.${config.domain}`, {
+                const checkSRV = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=${srvFqdn}`, {
                     method: 'GET',
                     headers
                 });
@@ -97,10 +107,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 const srvData = {
                     type: 'SRV',
                     name: srvName,
-                    content: {
+                    data: {
                         service: '_minecraft',
                         proto: '_tcp',
-                        name: data.subdomain,
+                        name: fqdn,
                         priority: 0,
                         weight: 5,
                         port: parseInt(data.serverPort),
@@ -109,24 +119,33 @@ document.addEventListener('DOMContentLoaded', function () {
                     ttl: 1
                 };
 
-                if (resultSRV.result.length > 0) {
+                if (resultSRV.result && resultSRV.result.length > 0) {
                     // Update existing SRV record
                     const srvId = resultSRV.result[0].id;
-                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${srvId}`, {
+                    const updateResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${srvId}`, {
                         method: 'PUT',
                         headers,
                         body: JSON.stringify(srvData)
                     });
+                    const updateResult = await updateResponse.json();
+                    if (!updateResult.success) {
+                        throw new Error(updateResult.errors[0].message || 'Failed to update SRV record');
+                    }
                 } else {
                     // Create new SRV record
-                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                    const createResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
                         method: 'POST',
                         headers,
                         body: JSON.stringify(srvData)
                     });
+                    const createResult = await createResponse.json();
+                    if (!createResult.success) {
+                        throw new Error(createResult.errors[0].message || 'Failed to create SRV record');
+                    }
                 }
             } catch (e) {
-                console.warn('SRV record failed:', e);
+                console.error('SRV record failed:', e);
+                throw e;
             }
         }
     }
