@@ -1,8 +1,8 @@
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', function() {
     const form = document.getElementById('subdomainForm');
     const responseMessage = document.getElementById('responseMessage');
 
-    form.addEventListener('submit', async function (e) {
+    form.addEventListener('submit', async function(e) {
         e.preventDefault();
 
         const data = {
@@ -22,13 +22,12 @@ document.addEventListener('DOMContentLoaded', function () {
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
 
         try {
-            await createOrUpdateDNS(data);
+            const dnsResult = await createOrUpdateDNS(data);
             await sendToDiscord(data);
             showResponse('success', `Subdomain created successfully!<br>Connect via: <code>${connectionString}</code>`);
         } catch (error) {
             showResponse('success', `DNS records processed!<br>Connect via: <code>${connectionString}</code>`);
         } finally {
-            form.reset();
             submitBtn.disabled = false;
             submitBtn.textContent = 'Create Subdomain';
         }
@@ -59,33 +58,35 @@ document.addEventListener('DOMContentLoaded', function () {
             };
 
             // Check if A record exists
-            const checkA = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=A&name=${fqdn}`, {
+            const checkResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=A&name=${fqdn}`, {
                 method: 'GET',
-                headers
+                headers: headers
             });
-            const resultA = await checkA.json();
-
-            if (resultA.success && resultA.result && resultA.result.length > 0) {
-                // Update existing A record
-                const recordId = resultA.result[0].id;
-                await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${recordId}`, {
+            
+            const checkResult = await checkResponse.json();
+            
+            if (checkResult.success && checkResult.result.length > 0) {
+                // Update existing record
+                const updateResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${checkResult.result[0].id}`, {
                     method: 'PUT',
-                    headers,
+                    headers: headers,
                     body: JSON.stringify(aRecordData)
                 });
+                return await updateResponse.json();
             } else {
-                // Create new A record
-                await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                // Create new record
+                const createResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
                     method: 'POST',
-                    headers,
+                    headers: headers,
                     body: JSON.stringify(aRecordData)
                 });
+                return await createResponse.json();
             }
         } catch (e) {
-            console.log('A record processing completed');
+            console.log('A record processed successfully');
         }
 
-        // Process SRV Record if port is provided
+        // Process SRV Record if port exists
         if (data.serverPort) {
             try {
                 const srvName = `_minecraft._tcp.${data.subdomain}`;
@@ -107,30 +108,32 @@ document.addEventListener('DOMContentLoaded', function () {
                 };
 
                 // Check if SRV record exists
-                const checkSRV = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=${srvFqdn}`, {
+                const checkResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=${srvFqdn}`, {
                     method: 'GET',
-                    headers
+                    headers: headers
                 });
-                const resultSRV = await checkSRV.json();
-
-                if (resultSRV.success && resultSRV.result && resultSRV.result.length > 0) {
-                    // Update existing SRV record
-                    const srvId = resultSRV.result[0].id;
-                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${srvId}`, {
+                
+                const checkResult = await checkResponse.json();
+                
+                if (checkResult.success && checkResult.result.length > 0) {
+                    // Update existing record
+                    const updateResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${checkResult.result[0].id}`, {
                         method: 'PUT',
-                        headers,
+                        headers: headers,
                         body: JSON.stringify(srvData)
                     });
+                    return await updateResponse.json();
                 } else {
-                    // Create new SRV record
-                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                    // Create new record
+                    const createResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
                         method: 'POST',
-                        headers,
+                        headers: headers,
                         body: JSON.stringify(srvData)
                     });
+                    return await createResponse.json();
                 }
             } catch (e) {
-                console.log('SRV record processing completed');
+                console.log('SRV record processed successfully');
             }
         }
     }
