@@ -53,27 +53,25 @@ document.addEventListener('DOMContentLoaded', function () {
             const resultA = await checkA.json();
 
             if (resultA.result.length > 0) {
-                // Update existing A record
                 const recordId = resultA.result[0].id;
                 await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${recordId}`, {
                     method: 'PUT',
                     headers,
                     body: JSON.stringify({
                         type: 'A',
-                        name: data.subdomain,
+                        name: fqdn,
                         content: data.serverAddress,
                         ttl: 1,
                         proxied: false
                     })
                 });
             } else {
-                // Create new A record
                 await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify({
                         type: 'A',
-                        name: data.subdomain,
+                        name: fqdn,
                         content: data.serverAddress,
                         ttl: 1,
                         proxied: false
@@ -86,45 +84,41 @@ document.addEventListener('DOMContentLoaded', function () {
 
         // --- SRV RECORD ---
         if (data.serverPort) {
-            const srvName = `_minecraft._tcp.${data.subdomain}`;
+            const srvFQDN = `_minecraft._tcp.${data.subdomain}.${config.domain}`;
+            const srvData = {
+                service: '_minecraft',
+                proto: '_tcp',
+                name: data.subdomain,
+                priority: 0,
+                weight: 5,
+                port: parseInt(data.serverPort),
+                target: fqdn
+            };
+
             try {
-                const checkSRV = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=${srvName}.${config.domain}`, {
+                const checkSRV = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=${srvFQDN}`, {
                     method: 'GET',
                     headers
                 });
                 const resultSRV = await checkSRV.json();
 
-                const srvData = {
-                    service: '_minecraft',
-                    proto: '_tcp',
-                    name: data.subdomain,
-                    priority: 0,
-                    weight: 5,
-                    port: parseInt(data.serverPort),
-                    target: fqdn
-                };
-
                 if (resultSRV.result.length > 0) {
-                    // Update existing SRV
                     const srvId = resultSRV.result[0].id;
                     await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${srvId}`, {
                         method: 'PUT',
                         headers,
                         body: JSON.stringify({
                             type: 'SRV',
-                            name: srvName,
                             data: srvData,
                             ttl: 1
                         })
                     });
                 } else {
-                    // Create new SRV
                     await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
                         method: 'POST',
                         headers,
                         body: JSON.stringify({
                             type: 'SRV',
-                            name: srvName,
                             data: srvData,
                             ttl: 1
                         })
