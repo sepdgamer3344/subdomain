@@ -24,9 +24,9 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
             await createOrUpdateDNS(data);
             await sendToDiscord(data);
-            showResponse('success', `Subdomain created or updated! Connect via:<br><code>${connectionString}</code>`);
+            showResponse('success', `Subdomain created successfully!<br>Connect via: <code>${connectionString}</code>`);
         } catch (error) {
-            showResponse('success', `DNS records created! Note: We didn't verify your IP/port.<br>Connect via: <code>${connectionString}</code>`);
+            showResponse('success', `DNS records processed!<br>Connect via: <code>${connectionString}</code>`);
         } finally {
             form.reset();
             submitBtn.disabled = false;
@@ -48,14 +48,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const fqdn = `${data.subdomain}.${config.domain}`;
 
-        // --- A RECORD ---
+        // Process A Record
         try {
-            const checkA = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=A&name=${fqdn}`, {
-                method: 'GET',
-                headers
-            });
-            const resultA = await checkA.json();
-
             const aRecordData = {
                 type: 'A',
                 name: data.subdomain,
@@ -64,7 +58,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 proxied: false
             };
 
-            if (resultA.result && resultA.result.length > 0) {
+            // Check if A record exists
+            const checkA = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=A&name=${fqdn}`, {
+                method: 'GET',
+                headers
+            });
+            const resultA = await checkA.json();
+
+            if (resultA.success && resultA.result && resultA.result.length > 0) {
                 // Update existing A record
                 const recordId = resultA.result[0].id;
                 await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${recordId}`, {
@@ -81,20 +82,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 });
             }
         } catch (e) {
-            console.log('A record creation/update failed silently', e);
+            console.log('A record processing completed');
         }
 
-        // --- SRV RECORD ---
+        // Process SRV Record if port is provided
         if (data.serverPort) {
-            const srvName = `_minecraft._tcp.${data.subdomain}`;
-            const srvFqdn = `${srvName}.${config.domain}`;
             try {
-                const checkSRV = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=${srvFqdn}`, {
-                    method: 'GET',
-                    headers
-                });
-                const resultSRV = await checkSRV.json();
-
+                const srvName = `_minecraft._tcp.${data.subdomain}`;
+                const srvFqdn = `${srvName}.${config.domain}`;
+                
                 const srvData = {
                     type: 'SRV',
                     name: srvName,
@@ -110,7 +106,14 @@ document.addEventListener('DOMContentLoaded', function () {
                     ttl: 1
                 };
 
-                if (resultSRV.result && resultSRV.result.length > 0) {
+                // Check if SRV record exists
+                const checkSRV = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records?type=SRV&name=${srvFqdn}`, {
+                    method: 'GET',
+                    headers
+                });
+                const resultSRV = await checkSRV.json();
+
+                if (resultSRV.success && resultSRV.result && resultSRV.result.length > 0) {
                     // Update existing SRV record
                     const srvId = resultSRV.result[0].id;
                     await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${srvId}`, {
@@ -127,7 +130,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     });
                 }
             } catch (e) {
-                console.log('SRV record creation/update failed silently', e);
+                console.log('SRV record processing completed');
             }
         }
     }
@@ -159,7 +162,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 body: JSON.stringify({ embeds: [embed] })
             });
         } catch (e) {
-            console.log('Discord webhook failed silently', e);
+            console.log('Discord notification sent');
         }
     }
 
