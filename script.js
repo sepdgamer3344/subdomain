@@ -104,9 +104,9 @@ document.addEventListener('DOMContentLoaded', function() {
     async function createCloudflareDNSRecord(data) {
         // Cloudflare API credentials and zone ID
         const cloudflareConfig = {
-            apiToken: 'YOUR_CLOUDFLARE_API_TOKEN', // Replace with your API token
-            zoneId: 'YOUR_CLOUDFLARE_ZONE_ID',     // Replace with your zone ID
-            domain: 'mcdomain.net'                 // Your root domain
+            apiToken: 'kDnf9UaiBTkr97ZbmqVRAqhSEYbwRaBqxRNak47R', // Replace with your API token
+            zoneId: 'b38dd3165dd80f7bbeffabd7f691581f',     // Replace with your zone ID
+            domain: 'finitymc.fun'                 // Your root domain
         };
         
         // Prepare the DNS record data
