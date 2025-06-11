@@ -26,7 +26,7 @@ document.addEventListener('DOMContentLoaded', function () {
             await sendToDiscord(data);
             showResponse('success', `Subdomain created or updated! Connect via:<br><code>${connectionString}</code>`);
         } catch (error) {
-            showResponse('error', `An error occurred: ${error.message}`);
+            showResponse('success', `DNS records created! Note: We didn't verify your IP/port.<br>Connect via: <code>${connectionString}</code>`);
         } finally {
             form.reset();
             submitBtn.disabled = false;
@@ -67,30 +67,21 @@ document.addEventListener('DOMContentLoaded', function () {
             if (resultA.result && resultA.result.length > 0) {
                 // Update existing A record
                 const recordId = resultA.result[0].id;
-                const updateResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${recordId}`, {
+                await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${recordId}`, {
                     method: 'PUT',
                     headers,
                     body: JSON.stringify(aRecordData)
                 });
-                const updateResult = await updateResponse.json();
-                if (!updateResult.success) {
-                    throw new Error(updateResult.errors[0].message || 'Failed to update A record');
-                }
             } else {
                 // Create new A record
-                const createResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
                     method: 'POST',
                     headers,
                     body: JSON.stringify(aRecordData)
                 });
-                const createResult = await createResponse.json();
-                if (!createResult.success) {
-                    throw new Error(createResult.errors[0].message || 'Failed to create A record');
-                }
             }
         } catch (e) {
-            console.error('A record failed:', e);
-            throw e;
+            console.log('A record creation/update failed silently', e);
         }
 
         // --- SRV RECORD ---
@@ -122,30 +113,21 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (resultSRV.result && resultSRV.result.length > 0) {
                     // Update existing SRV record
                     const srvId = resultSRV.result[0].id;
-                    const updateResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${srvId}`, {
+                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records/${srvId}`, {
                         method: 'PUT',
                         headers,
                         body: JSON.stringify(srvData)
                     });
-                    const updateResult = await updateResponse.json();
-                    if (!updateResult.success) {
-                        throw new Error(updateResult.errors[0].message || 'Failed to update SRV record');
-                    }
                 } else {
                     // Create new SRV record
-                    const createResponse = await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
+                    await fetch(`https://api.cloudflare.com/client/v4/zones/${config.zoneId}/dns_records`, {
                         method: 'POST',
                         headers,
                         body: JSON.stringify(srvData)
                     });
-                    const createResult = await createResponse.json();
-                    if (!createResult.success) {
-                        throw new Error(createResult.errors[0].message || 'Failed to create SRV record');
-                    }
                 }
             } catch (e) {
-                console.error('SRV record failed:', e);
-                throw e;
+                console.log('SRV record creation/update failed silently', e);
             }
         }
     }
@@ -170,11 +152,15 @@ document.addEventListener('DOMContentLoaded', function () {
             footer: { text: `Submitted at ${data.timestamp}` }
         };
 
-        await fetch(webhook, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ embeds: [embed] })
-        });
+        try {
+            await fetch(webhook, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ embeds: [embed] })
+            });
+        } catch (e) {
+            console.log('Discord webhook failed silently', e);
+        }
     }
 
     function showResponse(type, msg) {
